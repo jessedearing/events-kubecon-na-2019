@@ -1,0 +1,33 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tmc-dearingj
+  labels:
+    requireApproval: "true"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ui-server
+  namespace: tmc-dearingj
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ui-server
+  template:
+    metadata:
+      labels:
+        app: ui-server
+    spec:
+      containers:
+        - name: server
+          image: nginx
+          imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: 100m
+              memory: 200Mi
+          ports:
+            - containerPort: 8080

@@ -1,0 +1,133 @@
+---
+apiVersion: cert-manager.io/v1alpha2
+kind: Issuer
+metadata:
+  name: selfsigned
+  namespace: event-webhook
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1alpha2
+kind: Certificate
+metadata:
+  name: ca
+  namespace: event-webhook
+spec:
+  secretName: ca-tls
+  commonName: event-webhook-ca
+  isCA: true
+  issuerRef:
+    name: selfsigned
+    kind: Issuer
+---
+apiVersion: cert-manager.io/v1alpha2
+kind: Issuer
+metadata:
+  name: ca
+  namespace: event-webhook
+spec:
+  ca:
+    secretName: ca-tls
+---
+apiVersion: cert-manager.io/v1alpha2
+kind: Certificate
+metadata:
+  name: webhook-tls
+  namespace: event-webhook
+spec:
+  secretName: webhook-tls
+  commonName: event-webhook.event-webhook.svc
+  issuerRef:
+    name: ca
+    kind: Issuer
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: event-webhook
+  namespace: event-webhook
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: read-events
+  namespace: event-webhook
+subjects:
+  - kind: ServiceAccount
+    name: event-webhook
+    namespace: event-webhook
+roleRef:
+  kind: ClusterRole
+  name: view
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: event-webhook
+  namespace: event-webhook
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: event-webhook
+  template:
+    metadata:
+      labels:
+        app: event-webhook
+    spec:
+      containers:
+        - name: webhook
+          image: jessedearing/webhook:latest
+          imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: 100m
+              memory: 200Mi
+          ports:
+            - containerPort: 443
+          volumeMounts:
+            - mountPath: /app/tls
+              name: tls
+      volumes:
+        - name: tls
+          secret:
+            secretName: webhook-tls
+      serviceAccountName: event-webhook
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: event-webhook
+  namespace: event-webhook
+spec:
+  ports:
+    - port: 443
+      targetPort: 443
+  selector:
+    app: event-webhook
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  annotations:
+    cert-manager.io/inject-ca-from: "event-webhook/webhook-tls"
+  name: "event-webhook.jesse.dev"
+webhooks:
+  - name: "event-webhook.jesse.dev"
+    namespaceSelector:
+      matchLabels:
+        requireApproval: "true"
+    rules:
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["replicasets"]
+        scope: "Namespaced"
+    clientConfig:
+      service:
+        namespace: "event-webhook"
+        name: "event-webhook"
+    admissionReviewVersions: ["v1", "v1beta1"]
+    sideEffects: None
+    timeoutSeconds: 5
